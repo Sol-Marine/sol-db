@@ -75,10 +75,16 @@ export async function connect(dbUrl: string): Promise<ConnectionInfo> {
   const currentUser = who.rows[0]!.current_user;
   const serverVersion = who.rows[0]!.version;
 
-  await assertReadOnly(client, currentUser);
-
-  // Belt and braces: make every subsequent transaction read-only for this session.
+  // Lock the session down BEFORE any privilege analysis: from here on the
+  // server itself rejects writes, whatever the role's privileges say.
   await client.query("SET default_transaction_read_only = on");
+
+  try {
+    await assertReadOnly(client, currentUser);
+  } catch (err) {
+    await client.end().catch(() => {});
+    throw err;
+  }
 
   return { client, sslUsed, currentUser, serverVersion };
 }
@@ -99,11 +105,17 @@ async function assertReadOnly(client: Client, currentUser: string): Promise<void
     can_insert: boolean;
     can_update: boolean;
     can_delete: boolean;
+    public_insert: boolean;
+    public_update: boolean;
+    public_delete: boolean;
   }> = await client.query(
     `SELECT n.nspname AS schema_name, c.relname AS table_name,
             has_table_privilege(current_user, c.oid, 'INSERT') AS can_insert,
             has_table_privilege(current_user, c.oid, 'UPDATE') AS can_update,
-            has_table_privilege(current_user, c.oid, 'DELETE') AS can_delete
+            has_table_privilege(current_user, c.oid, 'DELETE') AS can_delete,
+            has_table_privilege('public', c.oid, 'INSERT') AS public_insert,
+            has_table_privilege('public', c.oid, 'UPDATE') AS public_update,
+            has_table_privilege('public', c.oid, 'DELETE') AS public_delete
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE c.relkind IN ('r', 'p')
@@ -111,19 +123,36 @@ async function assertReadOnly(client: Client, currentUser: string): Promise<void
        AND n.nspname NOT LIKE 'pg\\_%'`
   );
 
-  const writable = writeRes.rows.filter(
-    (r) => r.can_insert || r.can_update || r.can_delete
+  const directWritable = writeRes.rows.filter(
+    (r) =>
+      (r.can_insert && !r.public_insert) ||
+      (r.can_update && !r.public_update) ||
+      (r.can_delete && !r.public_delete)
   );
 
-  if (writable.length > 0) {
-    const list = writable
+  if (directWritable.length > 0) {
+    const list = directWritable
       .slice(0, 10)
       .map((r) => `${r.schema_name}.${r.table_name}`)
       .join(", ");
-    const more = writable.length > 10 ? ` (+${writable.length - 10} more)` : "";
+    const more =
+      directWritable.length > 10 ? ` (+${directWritable.length - 10} more)` : "";
     throw new ReadOnlyViolationError(
-      `Connected role "${currentUser}" has write privileges on ${writable.length} non-system table(s): ${list}${more}. ` +
+      `Connected role "${currentUser}" holds direct write privileges on ${directWritable.length} non-system table(s): ${list}${more}. ` +
         "Revoke INSERT/UPDATE/DELETE from the audit role before running sol-db."
+    );
+  }
+
+  // Write access inherited purely via PUBLIC means the TARGET is insecure
+  // (the rules below will report it) - not that the audit setup is wrong.
+  // The session is already pinned read-only, so proceeding is safe.
+  const publicOnly = writeRes.rows.filter(
+    (r) => r.can_insert || r.can_update || r.can_delete
+  );
+  if (publicOnly.length > 0) {
+    console.warn(
+      `[sol-db] WARNING: audit role inherits write privileges via PUBLIC on ${publicOnly.length} table(s). ` +
+        "That is a finding about the target, not this tool - session is enforced read-only."
     );
   }
 }

@@ -43,7 +43,11 @@ export function assessVersion(
     return findings;
   }
 
-  const isEol = typeof entry.eol === "string"; // eol date already passed per API
+  // endoflife.date returns the scheduled EOL date string for every version,
+  // including future ones - "is EOL" means that date has actually passed.
+  const eolTime =
+    typeof entry.eol === "string" ? new Date(entry.eol).getTime() : NaN;
+  const isEol = Number.isFinite(eolTime) && eolTime <= Date.now();
   if (isEol) {
     findings.push({
       id: "outdated-version/eol-major",
@@ -55,10 +59,7 @@ export function assessVersion(
         running: `${parsed.major}.${parsed.minor}.${parsed.patch}`,
         cycleEol: entry.eol,
       },
-      recommendation: `Upgrade to a supported major version (${eolData
-        .filter((e) => typeof e.eol !== "string")
-        .map((e) => e.cycle)
-        .join(", ")}) and plan migration testing.`,
+      recommendation: `Upgrade to a supported major version (${supportedCycles(eolData).join(", ")}) and plan migration testing.`,
     });
     return findings;
   }
@@ -86,6 +87,17 @@ export function assessVersion(
   }
 
   return findings;
+}
+
+function supportedCycles(eolData: EolEntry[]): Array<string | number> {
+  const now = Date.now();
+  return eolData
+    .filter((e) => {
+      if (typeof e.eol !== "string") return true;
+      const t = new Date(e.eol).getTime();
+      return Number.isFinite(t) && t > now;
+    })
+    .map((e) => e.cycle);
 }
 
 async function fetchEolData(): Promise<EolEntry[] | null> {

@@ -53,8 +53,14 @@ export async function getRoles(client: Client): Promise<RoleRow[]> {
  * Grants to PUBLIC on user relations (tables/views/sequences) and CREATE on
  * user schemas. Functions are skipped in v1 (EXECUTE-on-PUBLIC is the default
  * and would be pure noise).
+ *
+ * Note: PostgreSQL 18 removed the "public" row from pg_roles, so we resolve
+ * grantee OID 0 directly instead of joining on pg_roles.
  */
 export async function getPublicGrants(client: Client): Promise<PublicGrantRow[]> {
+  const GRANTEE_IS_PUBLIC = `CASE WHEN a.grantee = 0 THEN 'public'
+       ELSE (SELECT rolname FROM pg_roles WHERE oid = a.grantee) END = 'public'`;
+
   const relRes = await client.query<{
     schema_name: string;
     object_name: string;
@@ -66,8 +72,7 @@ export async function getPublicGrants(client: Client): Promise<PublicGrantRow[]>
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
      CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) AS a
-     JOIN pg_roles g ON g.oid = a.grantee
-     WHERE g.rolname = 'public'
+     WHERE ${GRANTEE_IS_PUBLIC}
        AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
        AND n.nspname NOT LIKE 'pg\\_%'
@@ -81,8 +86,7 @@ export async function getPublicGrants(client: Client): Promise<PublicGrantRow[]>
     `SELECT n.nspname AS schema_name, a.privilege_type
      FROM pg_namespace n
      CROSS JOIN LATERAL aclexplode(COALESCE(n.nspacl, acldefault('n', n.nspowner))) AS a
-     JOIN pg_roles g ON g.oid = a.grantee
-     WHERE g.rolname = 'public'
+     WHERE ${GRANTEE_IS_PUBLIC}
        AND a.privilege_type IN ('CREATE', 'USAGE')
        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
        AND n.nspname NOT LIKE 'pg\\_%'
@@ -170,13 +174,12 @@ export async function introspect(
   client: Client,
   connectionSsl: boolean
 ): Promise<RawData> {
+  // Sequential on purpose: one Client must not run overlapping queries.
   const version = await getVersion(client);
-  const [roles, publicGrants, settings, schemaObjects] = await Promise.all([
-    getRoles(client),
-    getPublicGrants(client),
-    getSettings(client),
-    getSchemaObjects(client),
-  ]);
+  const roles = await getRoles(client);
+  const publicGrants = await getPublicGrants(client);
+  const settings = await getSettings(client);
+  const schemaObjects = await getSchemaObjects(client);
   return {
     ...version,
     roles,

@@ -294,6 +294,14 @@ test("parseVersion extracts major.minor.patch", async () => {
   assert.equal(parseVersion("not a version"), null);
 });
 
+test("assessVersion treats future EOL dates as still supported", () => {
+  const eolData: EolEntry[] = [
+    { cycle: "18", latest: "18.4", releaseDate: null, eol: "2030-11-14", support: "2028-11-14" },
+  ];
+  const findings = assessVersion({ major: 18, minor: 4, patch: 0 }, eolData);
+  assert.equal(findings.length, 0); // not EOL, not behind
+});
+
 test("assessVersion flags EOL major as critical", () => {
   const eolData: EolEntry[] = [
     { cycle: "12", latest: "12.22", releaseDate: null, eol: "2024-11-14", support: false },
