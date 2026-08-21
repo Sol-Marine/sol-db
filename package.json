@@ -1,0 +1,39 @@
+{
+  "name": "sol-db",
+  "version": "0.1.0",
+  "description": "Read-only Postgres security auditor - connects to databases you own and produces scored security reports",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "sol-db": "dist/src/index.js"
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test dist/test/rules.test.js",
+    "cli": "tsc && node dist/src/index.js"
+  },
+  "keywords": [
+    "postgres",
+    "security",
+    "audit",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "commander": "^15.0.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
+}
