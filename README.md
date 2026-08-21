@@ -1,5 +1,7 @@
 # sol-db — Postgres Security Auditor
 
+[![CI](https://github.com/Sol-Marine/sol-db/actions/workflows/ci.yml/badge.svg)](https://github.com/Sol-Marine/sol-db/actions/workflows/ci.yml)
+
 A CLI tool that connects **read-only** to a Postgres database you own (Neon, Railway,
 self-hosted) and produces a scored security report: role/grant misconfigurations,
 missing RLS, weak TLS settings, outdated version/EOL status, and schema drift over time.
@@ -15,6 +17,22 @@ missing RLS, weak TLS settings, outdated version/EOL status, and schema drift ov
   `INSERT`/`UPDATE`/`DELETE` on any non-system table or is a superuser.
 - Store credentials in `.env`, never commit them, never log full connection strings.
 - Treat findings output as sensitive — a completed report is effectively a map of your weaknesses.
+
+## Try it without touching your real database
+
+The repo ships a script that creates a **deliberately insecure** throwaway database
+(missing RLS, PUBLIC write grants, a superuser role, plain-text secret columns), so you
+can watch every rule fire against real findings:
+
+```bash
+psql -U postgres -h localhost -d postgres -f demo/setup.sql
+# then point AUDIT_DB_URL at:
+# postgres://sol_audit:audit-demo-1234@localhost:5432/sol_demo?sslmode=disable
+npm run cli -- run --target local-demo
+
+# cleanup when done
+psql -U postgres -h localhost -d postgres -f demo/teardown.sql
+```
 
 ## Setup
 
